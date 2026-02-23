@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cámara Monitor</title>
+
+  <!-- MQTT.js via CDN -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ──────────────── TOKENS ──────────────── */
+    :root {
+      --bg:        #0a0c10;
+      --surface:   #111318;
+      --surface2:  #191d24;
+      --border:    rgba(255,255,255,0.07);
+      --accent:    #00e5c3;
+      --accent2:   #ff6b6b;
+      --accent3:   #ffd166;
+      --text:      #e8eaf0;
+      --muted:     #5a5f70;
+      --mono:      'Space Mono', monospace;
+      --sans:      'DM Sans', sans-serif;
+      --radius:    14px;
+      --glow:      0 0 24px rgba(0, 229, 195, 0.15);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ──────────────── FONDO ANIMADO ──────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 40% at 80% 20%, rgba(0,229,195,0.04) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 60% at 10% 80%, rgba(255,107,107,0.04) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ──────────────── LAYOUT ──────────────── */
+    .page { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
+
+    /* ──────────────── HEADER ──────────────── */
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 48px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; flex-direction: column; gap: 4px; }
+    .brand-tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .brand h1 {
+      font-size: clamp(1.4rem, 4vw, 2rem);
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+
+    /* Status chip */
+    .status-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 100px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 1px;
+      transition: all .3s;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: all .3s;
+    }
+    .status-chip.connected .status-dot {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 2s infinite;
+    }
+    .status-chip.connected { border-color: rgba(0,229,195,0.3); }
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.4; }
+    }
+
+    /* ──────────────── GRID CARDS ──────────────── */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .3s, box-shadow .3s;
+    }
+    .card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: var(--radius);
+      opacity: 0;
+      transition: opacity .3s;
+    }
+    .card.accent-teal::after  { background: radial-gradient(circle at top left, rgba(0,229,195,0.06) 0%, transparent 60%); opacity: 1; }
+    .card.accent-red::after   { background: radial-gradient(circle at top left, rgba(255,107,107,0.06) 0%, transparent 60%); opacity: 1; }
+    .card.accent-yellow::after{ background: radial-gradient(circle at top left, rgba(255,209,102,0.06) 0%, transparent 60%); opacity: 1; }
+
+    .card-label {
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-family: var(--mono);
+      margin-bottom: 16px;
+    }
+    .card-value {
+      font-family: var(--mono);
+      font-size: clamp(2.2rem, 5vw, 3rem);
+      font-weight: 700;
+      line-height: 1;
+      transition: all .4s;
+    }
+    .card-value.teal   { color: var(--accent); }
+    .card-value.red    { color: var(--accent2); }
+    .card-value.yellow { color: var(--accent3); }
+
+    .card-sub {
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    /* Barra PWM */
+    .pwm-bar-wrap {
+      margin-top: 14px;
+      height: 4px;
+      background: var(--surface2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .pwm-bar {
+      height: 100%;
+      border-radius: 2px;
+      transition: width .8s cubic-bezier(.4,0,.2,1);
+    }
+    .pwm-bar.teal   { background: var(--accent); }
+    .pwm-bar.red    { background: var(--accent2); }
+    .pwm-bar.yellow { background: var(--accent3); }
+
+    /* ──────────────── GRÁFICOS ──────────────── */
+    .charts-section { display: flex; flex-direction: column; gap: 24px; }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+    }
+
+    .chart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .chart-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .5px;
+    }
+    .chart-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+    }
+
+    .range-tabs {
+      display: flex;
+      gap: 4px;
+      background: var(--surface2);
+      padding: 4px;
+      border-radius: 8px;
+    }
+    .range-tab {
+      padding: 4px 12px;
+      border-radius: 6px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .range-tab.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: 0 1px 4px rgba(0,0,0,.4);
+    }
+
+    .chart-wrap { position: relative; height: 220px; }
+
+    /* ──────────────── LOG ──────────────── */
+    .log-card {
+      margin-top: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .log-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .log-clear {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      background: none;
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .log-clear:hover { color: var(--accent2); border-color: var(--accent2); }
+
+    #log-list {
+      list-style: none;
+      max-height: 180px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    #log-list li {
+      display: flex;
+      gap: 12px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 11px;
+      animation: fadeIn .3s ease;
+    }
+    #log-list li:last-child { border-bottom: none; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
+    .log-ts   { color: var(--muted); min-width: 80px; }
+    .log-topic{ color: var(--accent3); min-width: 140px; }
+    .log-msg  { color: var(--text); word-break: break-all; }
+
+    /* ──────────────── CONFIG MODAL ──────────────── */
+    .cfg-btn {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 20px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .2s;
+      z-index: 100;
+    }
+    .cfg-btn:hover { border-color: var(--accent); color: var(--accent); box-shadow: var(--glow); }
+
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.7);
+      backdrop-filter: blur(6px);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      width: min(480px, 94vw);
+      animation: slideUp .3s ease;
+    }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+    .modal h2 {
+      font-family: var(--mono);
+      font-size: 13px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 24px;
+    }
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      font-family: var(--mono);
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .form-group input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .form-group input:focus { border-color: var(--accent); }
+    .modal-actions { display: flex; gap: 12px; margin-top: 24px; }
+    .btn-primary, .btn-ghost {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-primary { background: var(--accent); color: var(--bg); font-weight: 700; }
+    .btn-primary:hover { filter: brightness(1.15); }
+    .btn-ghost  { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { color: var(--text); }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      header { flex-direction: column; align-items: flex-start; gap: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <header>
+    <div class="brand">
+      <span class="brand-tag">Monitor · ESP8266</span>
+      <h1>Cámara de Incubación</h1>
+    </div>
+    <div class="status-chip" id="statusChip">
+      <div class="status-dot"></div>
+      <span id="statusText">DESCONECTADO</span>
+    </div>
+  </header>
+
+  <!-- CARDS MÉTRICAS -->
+  <div class="cards-grid">
+    <!-- Temperatura control -->
+    <div class="card accent-teal">
+      <div class="card-label">Temp · Control</div>
+      <div class="card-value teal" id="val-temp-ctrl">--</div>
+      <div class="card-sub">Promedio 5 lecturas</div>
+    </div>
+
+    <!-- Humedad control -->
+    <div class="card accent-red">
+      <div class="card-label">Hum · Control</div>
+      <div class="card-value red" id="val-hum-ctrl">--</div>
+      <div class="card-sub">Promedio 5 lecturas</div>
+    </div>
+
+    <!-- Temperatura observador -->
+    <div class="card accent-teal">
+      <div class="card-label">Temp · Observador</div>
+      <div class="card-value teal" id="val-temp-obs">--</div>
+      <div class="card-sub">Última lectura 1 min</div>
+    </div>
+
+    <!-- Humedad observador -->
+    <div class="card accent-red">
+      <div class="card-label">Hum · Observador</div>
+      <div class="card-value red" id="val-hum-obs">--</div>
+      <div class="card-sub">Última lectura 1 min</div>
+    </div>
+
+    <!-- PWM Temp -->
+    <div class="card accent-teal">
+      <div class="card-label">PWM · Temperatura</div>
+      <div class="card-value teal" id="val-pwm-temp">--</div>
+      <div class="card-sub">/ 1023</div>
+      <div class="pwm-bar-wrap"><div class="pwm-bar teal" id="bar-pwm-temp" style="width:0%"></div></div>
+    </div>
+
+    <!-- PWM Hum -->
+    <div class="card accent-red">
+      <div class="card-label">PWM · Humedad</div>
+      <div class="card-value red" id="val-pwm-hum">--</div>
+      <div class="card-sub">/ 1023</div>
+      <div class="pwm-bar-wrap"><div class="pwm-bar red" id="bar-pwm-hum" style="width:0%"></div></div>
+    </div>
+
+    <!-- PWM 5V -->
+    <div class="card accent-yellow">
+      <div class="card-label">PWM · 5V</div>
+      <div class="card-value yellow" id="val-pwm-5v">--</div>
+      <div class="card-sub">/ 1023 · siempre máximo</div>
+      <div class="pwm-bar-wrap"><div class="pwm-bar yellow" id="bar-pwm-5v" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <!-- GRÁFICOS -->
+  <div class="charts-section">
+
+    <!-- Temperatura -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">
+          <div class="chart-dot" style="background:var(--accent)"></div>
+          Temperatura (°C)
+        </div>
+        <div class="range-tabs">
+          <button class="range-tab" onclick="setRange(60,this)">1H</button>
+          <button class="range-tab active" onclick="setRange(1440,this)">24H</button>
+          <button class="range-tab" onclick="setRange(10080,this)">7D</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="chartTemp"></canvas></div>
+    </div>
+
+    <!-- Humedad -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">
+          <div class="chart-dot" style="background:var(--accent2)"></div>
+          Humedad (%)
+        </div>
+        <div class="range-tabs">
+          <button class="range-tab" onclick="setRange(60,this,'hum')">1H</button>
+          <button class="range-tab active" onclick="setRange(1440,this,'hum')">24H</button>
+          <button class="range-tab" onclick="setRange(10080,this,'hum')">7D</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="chartHum"></canvas></div>
+    </div>
+  </div>
+
+  <!-- LOG -->
+  <div class="log-card">
+    <div class="log-header">
+      <span class="log-title">Log MQTT</span>
+      <button class="log-clear" onclick="clearLog()">Limpiar</button>
+    </div>
+    <ul id="log-list"></ul>
+  </div>
+
+</div>
+
+<!-- BOTÓN CONFIG -->
+<button class="cfg-btn" onclick="openModal()" title="Configuración MQTT">⚙</button>
+
+<!-- MODAL CONFIG -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2>Configuración MQTT</h2>
+    <div class="form-group">
+      <label>HiveMQ Host</label>
+      <input id="cfg-host" type="text" placeholder="xxxxxxxx.s1.eu.hivemq.cloud" />
+    </div>
+    <div class="form-group">
+      <label>Puerto WebSocket TLS</label>
+      <input id="cfg-port" type="number" value="8884" />
+    </div>
+    <div class="form-group">
+      <label>Usuario</label>
+      <input id="cfg-user" type="text" placeholder="tu_usuario" />
+    </div>
+    <div class="form-group">
+      <label>Contraseña</label>
+      <input id="cfg-pass" type="password" placeholder="••••••••" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn-primary" onclick="saveAndConnect()">Conectar</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// ══════════════════════════════════════════════
+//  CONFIGURACIÓN POR DEFECTO
+//  Estos valores se pueden sobreescribir desde
+//  el modal ⚙ o cambiando las constantes aquí
+// ══════════════════════════════════════════════
+const DEFAULTS = {
+  host: 'TU_CLUSTER.s1.eu.hivemq.cloud',
+  port: 8884,
+  user: 'TU_USUARIO_HIVEMQ',
+  pass: 'TU_PASSWORD_HIVEMQ'
+};
+
+const TOPICS = {
+  control:    'camara/control',
+  observador: 'camara/observador',
+  pwm:        'camara/pwm',
+  status:     'camara/status'
+};
+
+// ══════════════════════════════════════════════
+//  ESTADO
+// ══════════════════════════════════════════════
+let mqttClient  = null;
+let rangeMinTemp = 1440;
+let rangeMinHum  = 1440;
+
+const seriesTemp = [];  // { x: timestamp, y: value }
+const seriesHum  = [];
+
+// ══════════════════════════════════════════════
+//  GRÁFICOS
+// ══════════════════════════════════════════════
+function makeChart(canvasId, color, yMin, yMax, yLabel) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        data: [],
+        borderColor: color,
+        backgroundColor: color + '18',
+        borderWidth: 2,
+        pointRadius: 2,
+        tension: 0.3,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 600 },
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: {
+          title: c => new Date(c[0].parsed.x).toLocaleString('es-AR'),
+          label: c => c.parsed.y.toFixed(1) + (yLabel === 'Temp' ? ' °C' : ' %')
+        }
+      }},
+      scales: {
+        x: {
+          type: 'time',
+          time: { displayFormats: { minute:'HH:mm', hour:'HH:mm', day:'dd/MM' } },
+          ticks: { color: '#5a5f70', font: { family: 'Space Mono', size: 10 } },
+          grid: { color: 'rgba(255,255,255,0.04)' }
+        },
+        y: {
+          min: yMin, max: yMax,
+          ticks: { color: '#5a5f70', font: { family: 'Space Mono', size: 10 } },
+          grid: { color: 'rgba(255,255,255,0.04)' }
+        }
+      }
+    }
+  });
+}
+
+const chartTemp = makeChart('chartTemp', '#00e5c3', 25, 35, 'Temp');
+const chartHum  = makeChart('chartHum',  '#ff6b6b', 50, 70, 'Hum');
+
+function updateChart(chart, series, rangeMin) {
+  const cutoff = Date.now() - rangeMin * 60 * 1000;
+  chart.data.datasets[0].data = series.filter(p => p.x >= cutoff);
+  chart.update('none');
+}
+
+function setRange(minutes, btn, type) {
+  // actualizar botones activos en la misma fila
+  const parent = btn.parentElement;
+  parent.querySelectorAll('.range-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  if (!type || type === 'temp') {
+    rangeMinTemp = minutes;
+    updateChart(chartTemp, seriesTemp, rangeMinTemp);
+  }
+  if (type === 'hum') {
+    rangeMinHum = minutes;
+    updateChart(chartHum, seriesHum, rangeMinHum);
+  }
+}
+
+// ══════════════════════════════════════════════
+//  UI HELPERS
+// ══════════════════════════════════════════════
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function setBar(id, value, max) {
+  const el = document.getElementById(id);
+  if (el) el.style.width = ((value / max) * 100).toFixed(1) + '%';
+}
+
+function addLog(topic, msg) {
+  const list = document.getElementById('log-list');
+  const li = document.createElement('li');
+  const ts = new Date().toLocaleTimeString('es-AR');
+  li.innerHTML = `<span class="log-ts">${ts}</span><span class="log-topic">${topic}</span><span class="log-msg">${msg}</span>`;
+  list.prepend(li);
+  if (list.children.length > 50) list.lastElementChild.remove();
+}
+
+function clearLog() {
+  document.getElementById('log-list').innerHTML = '';
+}
+
+function setStatus(connected) {
+  const chip = document.getElementById('statusChip');
+  const txt  = document.getElementById('statusText');
+  chip.className = 'status-chip' + (connected ? ' connected' : '');
+  txt.textContent = connected ? 'CONECTADO' : 'DESCONECTADO';
+}
+
+// ══════════════════════════════════════════════
+//  MQTT
+// ══════════════════════════════════════════════
+function connect(cfg) {
+  if (mqttClient) {
+    mqttClient.end(true);
+    mqttClient = null;
+  }
+
+  const url = `wss://${cfg.host}:${cfg.port}/mqtt`;
+
+  mqttClient = mqtt.connect(url, {
+    clientId: 'WebDashboard_' + Math.random().toString(16).slice(2, 8),
+    username: cfg.user,
+    password: cfg.pass,
+    clean: true,
+    reconnectPeriod: 5000,
+    connectTimeout: 10000
+  });
+
+  mqttClient.on('connect', () => {
+    setStatus(true);
+    addLog('SISTEMA', '✓ Conectado a HiveMQ');
+
+    Object.values(TOPICS).forEach(t => mqttClient.subscribe(t));
+  });
+
+  mqttClient.on('error', err => {
+    addLog('ERROR', err.message);
+    setStatus(false);
+  });
+
+  mqttClient.on('offline', () => setStatus(false));
+  mqttClient.on('reconnect', () => addLog('SISTEMA', 'Reconectando...'));
+
+  mqttClient.on('message', (topic, payload) => {
+    const raw = payload.toString();
+    addLog(topic, raw);
+
+    try {
+      const data = JSON.parse(raw);
+
+      if (topic === TOPICS.control) {
+        const t = parseFloat(data.temp);
+        const h = parseFloat(data.hum);
+        setText('val-temp-ctrl', t.toFixed(1) + ' °C');
+        setText('val-hum-ctrl',  h.toFixed(1) + ' %');
+        const now = Date.now();
+        seriesTemp.push({ x: now, y: t });
+        seriesHum.push({ x: now, y: h });
+        // Limitar a 10080 min de datos
+        const cutMax = now - 10080 * 60 * 1000;
+        while (seriesTemp.length && seriesTemp[0].x < cutMax) seriesTemp.shift();
+        while (seriesHum.length  && seriesHum[0].x  < cutMax) seriesHum.shift();
+        updateChart(chartTemp, seriesTemp, rangeMinTemp);
+        updateChart(chartHum,  seriesHum,  rangeMinHum);
+      }
+
+      if (topic === TOPICS.observador) {
+        setText('val-temp-obs', parseFloat(data.temp).toFixed(1) + ' °C');
+        setText('val-hum-obs',  parseFloat(data.hum).toFixed(1)  + ' %');
+      }
+
+      if (topic === TOPICS.pwm) {
+        const t = data.temp ?? 0;
+        const h = data.hum  ?? 0;
+        const v = data.v5   ?? 0;
+        setText('val-pwm-temp', t);
+        setText('val-pwm-hum',  h);
+        setText('val-pwm-5v',   v);
+        setBar('bar-pwm-temp', t, 1023);
+        setBar('bar-pwm-hum',  h, 1023);
+        setBar('bar-pwm-5v',   v, 1023);
+      }
+
+    } catch(e) {
+      // no JSON — ignorar
+    }
+  });
+}
+
+// ══════════════════════════════════════════════
+//  MODAL
+// ══════════════════════════════════════════════
+function openModal() {
+  const saved = loadCfg();
+  document.getElementById('cfg-host').value = saved.host;
+  document.getElementById('cfg-port').value = saved.port;
+  document.getElementById('cfg-user').value = saved.user;
+  document.getElementById('cfg-pass').value = saved.pass;
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+function saveAndConnect() {
+  const cfg = {
+    host: document.getElementById('cfg-host').value.trim(),
+    port: parseInt(document.getElementById('cfg-port').value),
+    user: document.getElementById('cfg-user').value.trim(),
+    pass: document.getElementById('cfg-pass').value
+  };
+  localStorage.setItem('mqttCfg', JSON.stringify(cfg));
+  closeModal();
+  connect(cfg);
+}
+function loadCfg() {
+  try {
+    const s = localStorage.getItem('mqttCfg');
+    return s ? JSON.parse(s) : DEFAULTS;
+  } catch { return DEFAULTS; }
+}
+
+// ══════════════════════════════════════════════
+//  INICIO
+// ══════════════════════════════════════════════
+window.addEventListener('load', () => {
+  const cfg = loadCfg();
+  // Solo conectar automáticamente si el host fue personalizado
+  if (cfg.host !== DEFAULTS.host) {
+    connect(cfg);
+  } else {
+    addLog('SISTEMA', 'Configurá tus credenciales HiveMQ con ⚙');
+  }
+});
+</script>
+</body>
+</html>
