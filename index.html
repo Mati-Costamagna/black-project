@@ -150,9 +150,10 @@
     }
     .card-value {
       font-family: var(--mono);
-      font-size: clamp(2.2rem, 5vw, 3rem);
+      font-size: clamp(1.4rem, 3vw, 1.9rem);
       font-weight: 700;
       line-height: 1;
+      white-space: nowrap;
       transition: all .4s;
     }
     .card-value.teal   { color: var(--accent); }
@@ -714,7 +715,7 @@ function connect(cfg) {
         const t = parseFloat(data.temp);
         const h = parseFloat(data.hum);
         setText('val-temp-ctrl', t.toFixed(1) + ' °C');
-        setText('val-hum-ctrl',  h.toFixed(1) + ' %');
+        setText('val-hum-ctrl',  h.toFixed(0) + ' %');
         const now = Date.now();
         seriesTemp.push({ x: now, y: t });
         seriesHum.push({ x: now, y: h });
@@ -728,7 +729,7 @@ function connect(cfg) {
 
       if (topic === TOPICS.observador) {
         setText('val-temp-obs', parseFloat(data.temp).toFixed(1) + ' °C');
-        setText('val-hum-obs',  parseFloat(data.hum).toFixed(1)  + ' %');
+        setText('val-hum-obs',  parseFloat(data.hum).toFixed(0)  + ' %');
       }
 
       if (topic === TOPICS.pwm) {
